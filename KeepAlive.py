@@ -5,15 +5,16 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "✅ XO Bot is alive! 🎮"
-
-@app.route('/health')
-def health():
-    return {"status": "ok", "message": "Bot is running"}
+    # دي الرسالة اللي بيشوفها UptimeRobot لما بيزور الرابط
+    return "Hello! RAG Chatbot is alive!"
 
 def run():
-    app.run(host='0.0.0.0', port=8080)
+  # تشغيل السيرفر على الـ Host والـ Port اللي بيستخدمهم Replit
+  # (0.0.0.0 و 8080 هم القيم الافتراضية)
+  app.run(host='0.0.0.0', port=8080)
 
 def keep_alive():
+    # هنا بنبدأ عملية تشغيل السيرفر في خيط (Thread) منفصل
+    # عشان ما يوقفش الكود الأساسي في bot.py
     t = Thread(target=run)
     t.start()
