@@ -1,20 +1,32 @@
 from flask import Flask
 from threading import Thread
+import os
 
 app = Flask('')
 
 @app.route('/')
 def home():
     # دي الرسالة اللي بيشوفها UptimeRobot لما بيزور الرابط
-    return "Hello! RAG Chatbot is alive!"
+    return "Hello!is alive!"
 
-def run():
-  # تشغيل السيرفر على الـ Host والـ Port اللي بيستخدمهم Replit
-  # (0.0.0.0 و 8080 هم القيم الافتراضية)
-  app.run(host='0.0.0.0', port=8080)
+def _run():
+    # تشغيل السيرفر على الـ Host والـ Port اللي بيستخدمهم Replit
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", 8080))
+    # use_reloader=False to avoid creating multiple threads/processes when imported
+    app.run(host=host, port=port, threaded=True, debug=False, use_reloader=False)
 
 def keep_alive():
-    # هنا بنبدأ عملية تشغيل السيرفر في خيط (Thread) منفصل
-    # عشان ما يوقفش الكود الأساسي في bot.py
-    t = Thread(target=run)
+    """
+    Start the Flask keep-alive server in a daemon thread.
+
+    Returns:
+        threading.Thread: the thread running the Flask app (daemon=True)
+    """
+    t = Thread(target=_run, daemon=True)
     t.start()
+    return t
+
+# Optional: run the server when executing this module directly (useful for local testing)
+if __name__ == "__main__":
+    keep_alive()
