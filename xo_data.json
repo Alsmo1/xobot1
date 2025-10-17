@@ -1,0 +1,23 @@
+{
+  "stats": {
+    "5428614557": {
+      "wins": 2,
+      "losses": 0,
+      "draws": 0,
+      "total_games": 2,
+      "history": [
+        {
+          "date": "2025-10-17 02:00",
+          "result": "win"
+        },
+        {
+          "date": "2025-10-17 01:58",
+          "result": "win"
+        }
+      ]
+    }
+  },
+  "themes": {
+    "5428614557": "hearts"
+  }
+}
