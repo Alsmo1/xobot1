@@ -6,6 +6,7 @@ import json
 import random
 from datetime import datetime
 import asyncio
+from KeepAlive import keep_alive
 
 # 🔧 إعداد Logging
 logging.basicConfig(
@@ -501,7 +502,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if winner:
         if winner == "X":
             update_stats(user_id, "win")
-            result_msg = f"🎉 {random.choice(MESSAGES['win'])}"
+            result_msg = f"🎉 {random.choice(MESSAGES['win'])}" 
             sticker_type = "win"
         else:
             update_stats(user_id, "loss")
@@ -580,10 +581,23 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """معالجة الأخطاء"""
     logger.error(f"Exception while handling an update: {context.error}")
 
+# ----------------------------------------------------------------------
+## 🎯 دالة التشغيل الرئيسية (main) - تم تعديلها للحفاظ على التشغيل
+# ----------------------------------------------------------------------
+
 def main():
     """تشغيل البوت"""
-    TOKEN = "8115080119:AAFyvt43RPPZ8irKirKL46XxBQrPUoH7QKE"
+    import os
+    # الحصول على التوكن من متغيرات البيئة (وهذا هو الأفضل والأكثر أماناً)
+    TOKEN = os.getenv('BOT_TOKEN')
     
+    # التحقق من وجود التوكن
+    if not TOKEN:
+        logger.error("BOT_TOKEN environment variable is not set!")
+        # يمكن استبدال هذا التوكن بتوكن الاختبار لو لم يكن متوفراً
+        # لكن الأفضل هو ترك الكود يفشل لتجنب نشر التوكن
+        raise ValueError("BOT_TOKEN environment variable is required") 
+
     app = ApplicationBuilder().token(TOKEN).build()
     
     # إضافة المعالجات
@@ -598,7 +612,15 @@ def main():
     print("📊 Stats & History: Enabled")
     print("🎵 Stickers: Enabled")
     
+    # 💥 التعديل الحاسم هنا!
+    # نشغل سيرفر Flask في خيط منفصل أولاً لضمان بقاء Replit نشطاً
+    keep_alive() 
+    
+    # ثم نشغل البوت الأساسي باستخدام run_polling()، والذي يحافظ على عمل البوت
+    # طالما أن Flask KeepAlive يمنع Replit من الدخول في وضع السكون.
     app.run_polling(allowed_updates=Update.ALL_TYPES)
+    
+# ----------------------------------------------------------------------
 
 if __name__ == "__main__":
     main()
