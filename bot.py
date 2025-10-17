@@ -5,8 +5,6 @@ from typing import Dict, List, Optional
 import json
 import random
 from datetime import datetime
-import asyncio
-from KeepAlive import keep_alive
 
 # 🔧 إعداد Logging
 logging.basicConfig(
@@ -62,11 +60,17 @@ def load_data():
             return json.load(f)
     except FileNotFoundError:
         return {"stats": {}, "themes": {}}
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error loading xo_data.json: {e}")
+        return {"stats": {}, "themes": {}}
+    except Exception as e:
+        logger.error(f"Unexpected error loading xo_data.json: {e}")
+        return {"stats": {}, "themes": {}}
 
 def save_data():
     """حفظ البيانات في الملف"""
     try:
-        data = {"stats": stats, "themes": user_themes}
+        data = {"stats": stats, "themes": {str(k): v for k, v in user_themes.items()}}
         with open('xo_data.json', 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
@@ -74,12 +78,14 @@ def save_data():
 
 # تحميل البيانات عند البدء
 data = load_data()
-stats = data.get("stats", {})
-user_themes = {int(k): v for k, v in data.get("themes", {}).items()}
+stats = data.get("stats", {}) or {}
+# Only convert keys to int when they look like integers
+raw_themes = data.get("themes", {}) or {}
+user_themes = {int(k): v for k, v in raw_themes.items() if isinstance(k, str) and k.isdigit()}
 
 class XOGame:
     """فئة للتعامل مع منطق لعبة XO"""
-    
+
     def __init__(self, user_id: int, timed_mode: bool = False):
         self.board: List[List[str]] = [[" " for _ in range(3)] for _ in range(3)]
         self.current_player: str = "X"
@@ -89,11 +95,11 @@ class XOGame:
         self.time_left = {"X": 60, "O": 60} if timed_mode else None
         self.last_move_time = datetime.now() if timed_mode else None
         self.theme = user_themes.get(user_id, "classic")
-    
+
     def get_symbols(self):
         """الحصول على رموز الثيم الحالي"""
         return THEMES.get(self.theme, THEMES["classic"])
-    
+
     def make_move(self, row: int, col: int) -> bool:
         """تنفيذ حركة اللاعب"""
         if self.board[row][col] == " ":
@@ -102,52 +108,53 @@ class XOGame:
                 elapsed = (datetime.now() - self.last_move_time).total_seconds()
                 self.time_left[self.current_player] -= elapsed
                 if self.time_left[self.current_player] <= 0:
+                    # player's time expired, move is invalid
                     return False
-            
+
             self.board[row][col] = self.current_player
             self.move_count += 1
             self.last_move_time = datetime.now() if self.timed_mode else None
             return True
         return False
-    
+
     def check_winner(self) -> Optional[str]:
         """التحقق من الفائز"""
         # فحص الصفوف
         for i in range(3):
             if self.board[i][0] == self.board[i][1] == self.board[i][2] != " ":
                 return self.board[i][0]
-        
+
         # فحص الأعمدة
         for i in range(3):
             if self.board[0][i] == self.board[1][i] == self.board[2][i] != " ":
                 return self.board[0][i]
-        
+
         # فحص الأقطار
         if self.board[0][0] == self.board[1][1] == self.board[2][2] != " ":
             return self.board[1][1]
         if self.board[0][2] == self.board[1][1] == self.board[2][0] != " ":
             return self.board[1][1]
-        
+
         return None
-    
+
     def is_draw(self) -> bool:
         """التحقق من التعادل"""
         return self.move_count == 9 and self.check_winner() is None
-    
+
     def check_timeout(self) -> Optional[str]:
         """التحقق من انتهاء الوقت"""
         if not self.timed_mode or not self.last_move_time:
             return None
-        
+
         elapsed = (datetime.now() - self.last_move_time).total_seconds()
         if self.time_left[self.current_player] - elapsed <= 0:
             return self.current_player
         return None
-    
+
     def switch_player(self):
         """تبديل اللاعب"""
         self.current_player = "O" if self.current_player == "X" else "X"
-    
+
     def get_board_text(self) -> str:
         """الحصول على نص اللوحة"""
         symbols = self.get_symbols()
@@ -155,18 +162,21 @@ class XOGame:
         for row in self.board:
             line = " │ ".join([symbols.get(cell, symbols["empty"]) for cell in row])
             lines.append(line)
-        
-        board_text = "\n" + "─" * 11 + "\n".join(["\n" + line + "\n" for line in lines]) + "─" * 11
-        
+
+        # Build board with clearer borders/newlines
+        board_body = "\n".join([f"{line}" for line in lines])
+        border = "─" * 11
+        board_text = f"{border}\n{board_body}\n{border}"
+
         # إضافة معلومات الوقت
         if self.timed_mode:
             elapsed = (datetime.now() - self.last_move_time).total_seconds() if self.last_move_time else 0
             time_x = max(0, int(self.time_left["X"] - (elapsed if self.current_player == "X" else 0)))
             time_o = max(0, int(self.time_left["O"] - (elapsed if self.current_player == "O" else 0)))
             board_text += f"\n\n⏱️ الوقت: {symbols['X']} {time_x}s | {symbols['O']} {time_o}s"
-        
+
         return board_text
-    
+
     def get_keyboard(self) -> InlineKeyboardMarkup:
         """إنشاء لوحة المفاتيح"""
         symbols = self.get_symbols()
@@ -180,7 +190,7 @@ class XOGame:
                     button_text = symbols[self.board[i][j]]
                 row.append(InlineKeyboardButton(button_text, callback_data=f"{i},{j}"))
             keyboard.append(row)
-        
+
         # أزرار التحكم
         control_row = [
             InlineKeyboardButton("🔄 جديدة", callback_data="restart"),
@@ -188,7 +198,7 @@ class XOGame:
             InlineKeyboardButton("🎨 ثيم", callback_data="change_theme")
         ]
         keyboard.append(control_row)
-        
+
         return InlineKeyboardMarkup(keyboard)
 
 def get_user_stats(user_id: int) -> Dict:
@@ -208,14 +218,14 @@ def update_stats(user_id: int, result: str):
     """تحديث الإحصائيات"""
     user_stats = get_user_stats(user_id)
     user_stats["total_games"] += 1
-    
+
     if result == "win":
         user_stats["wins"] += 1
     elif result == "loss":
         user_stats["losses"] += 1
     elif result == "draw":
         user_stats["draws"] += 1
-    
+
     # إضافة للتاريخ
     game_record = {
         "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -223,7 +233,7 @@ def update_stats(user_id: int, result: str):
     }
     user_stats["history"].insert(0, game_record)
     user_stats["history"] = user_stats["history"][:10]  # الاحتفاظ بآخر 10 فقط
-    
+
     save_data()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -242,14 +252,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("❓ مساعدة", callback_data="show_help")
         ]
     ]
-    
-    user_name = update.effective_user.first_name
+
+    user_name = update.effective_user.first_name if update.effective_user else "Player"
     welcome_text = (
         f"👋 أهلاً **{user_name}**!\n\n"
         "🎮 **مرحباً بك في لعبة XO المطورة!**\n\n"
         "اختر وضع اللعب للبدء:"
     )
-    
+
     await update.message.reply_text(
         welcome_text,
         reply_markup=InlineKeyboardMarkup(keyboard),
@@ -259,17 +269,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """معالجة نقرات الأزرار"""
     query = update.callback_query
-    await query.answer()
-    
-    chat_id = query.message.chat_id
-    user_id = query.from_user.id
-    user_name = query.from_user.first_name
-    
+    if not query:
+        return
+
+    # answer callback once (non-alert); branches that need an alert will try to use query.answer again but handle exceptions
+    try:
+        await query.answer()
+    except Exception:
+        # ignore if already answered
+        pass
+
+    chat_id = query.message.chat.id if query.message and query.message.chat else None
+    user_id = query.from_user.id if query.from_user else None
+    user_name = query.from_user.first_name if query.from_user else "Player"
+
+    # If we can't determine chat or user, abort safely
+    if chat_id is None or user_id is None:
+        return
+
     # اختيار الوضع العادي
     if query.data == "mode_normal":
         game = XOGame(user_id, timed_mode=False)
         games[chat_id] = game
-        
+
         symbols = game.get_symbols()
         await query.edit_message_text(
             f"🎮 **لعبة جديدة!**\n\n"
@@ -279,12 +301,12 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         return
-    
+
     # اختيار الوضع بالوقت
     elif query.data == "mode_timed":
         game = XOGame(user_id, timed_mode=True)
         games[chat_id] = game
-        
+
         symbols = game.get_symbols()
         await query.edit_message_text(
             f"⏱️ **وضع الوقت!**\n\n"
@@ -295,7 +317,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         return
-    
+
     # تغيير الثيم
     elif query.data == "change_theme":
         keyboard = []
@@ -304,22 +326,28 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             button_text = f"{theme_symbols['X']} {theme_name.title()} {emoji}"
             keyboard.append([InlineKeyboardButton(button_text, callback_data=f"theme_{theme_name}")])
         keyboard.append([InlineKeyboardButton("🔙 رجوع", callback_data="back_to_menu")])
-        
+
         await query.edit_message_text(
             "🎨 **اختر الثيم المفضل:**",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
         return
-    
+
     # تطبيق الثيم
     elif query.data.startswith("theme_"):
         theme_name = query.data.replace("theme_", "")
         user_themes[user_id] = theme_name
         save_data()
-        
-        symbols = THEMES[theme_name]
-        await query.answer(f"✅ تم تطبيق ثيم {theme_name}!", show_alert=True)
+
+        symbols = THEMES.get(theme_name, THEMES["classic"])
+        # Try to show an alert; may raise if callback already answered
+        try:
+            await query.answer(f"✅ تم تطبيق ثيم {theme_name}!", show_alert=True)
+        except Exception:
+            # ignore duplicate answer errors
+            pass
+
         await query.edit_message_text(
             f"✨ **تم تغيير الثيم!**\n\n"
             f"الثيم الجديد: {symbols['X']} {theme_name.title()}\n\n"
@@ -331,13 +359,13 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         return
-    
+
     # عرض الإحصائيات
     elif query.data == "show_stats":
         user_stats = get_user_stats(user_id)
         total = user_stats["total_games"]
         win_rate = (user_stats["wins"] / total * 100) if total > 0 else 0
-        
+
         stats_text = (
             f"📊 **إحصائيات {user_name}**\n\n"
             f"🎮 المباريات: {total}\n"
@@ -346,7 +374,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🤝 التعادل: {user_stats['draws']}\n"
             f"📈 نسبة الفوز: {win_rate:.1f}%\n"
         )
-        
+
         keyboard = [[InlineKeyboardButton("🔙 رجوع", callback_data="back_to_menu")]]
         await query.edit_message_text(
             stats_text,
@@ -354,12 +382,12 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         return
-    
+
     # عرض التاريخ
     elif query.data == "show_history":
         user_stats = get_user_stats(user_id)
         history = user_stats.get("history", [])
-        
+
         if not history:
             history_text = "📜 **لا توجد مباريات سابقة**\n\nابدأ اللعب لبناء تاريخك!"
         else:
@@ -367,7 +395,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for i, game in enumerate(history, 1):
                 result_emoji = {"win": "🏆", "loss": "💔", "draw": "🤝"}.get(game["result"], "🎮")
                 history_text += f"{i}. {result_emoji} {game['result'].upper()} - {game['date']}\n"
-        
+
         keyboard = [[InlineKeyboardButton("🔙 رجوع", callback_data="back_to_menu")]]
         await query.edit_message_text(
             history_text,
@@ -375,7 +403,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         return
-    
+
     # المساعدة
     elif query.data == "show_help":
         help_text = (
@@ -394,7 +422,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• رسائل تشجيعية مستمرة\n\n"
             "💡 **نصيحة:** العب باستمرار لتحسين إحصائياتك!"
         )
-        
+
         keyboard = [[InlineKeyboardButton("🔙 رجوع", callback_data="back_to_menu")]]
         await query.edit_message_text(
             help_text,
@@ -402,7 +430,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         return
-    
+
     # رجوع للقائمة
     elif query.data == "back_to_menu":
         keyboard = [
@@ -419,20 +447,23 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("❓ مساعدة", callback_data="show_help")
             ]
         ]
-        
+
         await query.edit_message_text(
             f"👋 أهلاً **{user_name}**!\n\n🎮 اختر وضع اللعب:",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
         return
-    
+
     game = games.get(chat_id)
-    
+
     if not game:
-        await query.answer("❌ اللعبة غير موجودة!", show_alert=True)
+        try:
+            await query.answer("❌ اللعبة غير موجودة!", show_alert=True)
+        except Exception:
+            pass
         return
-    
+
     # إعادة اللعب
     if query.data == "restart":
         keyboard = [
@@ -450,13 +481,13 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if chat_id in games:
             del games[chat_id]
         return
-    
+
     # التحقق من انتهاء الوقت
     timeout_player = game.check_timeout()
     if timeout_player:
         winner = "O" if timeout_player == "X" else "X"
         update_stats(user_id, "loss")
-        
+
         symbols = game.get_symbols()
         result_text = (
             f"⏰ **انتهى الوقت!**\n\n"
@@ -464,78 +495,81 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🏆 الفائز: {symbols[winner]}\n\n"
             f"{game.get_board_text()}"
         )
-        
+
         keyboard = [[
             InlineKeyboardButton("🔄 لعب مرة أخرى", callback_data="restart"),
             InlineKeyboardButton("📊 إحصائيات", callback_data="show_stats")
         ]]
-        
+
         await query.edit_message_text(
             result_text,
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
-        
+
         # إرسال ستيكر
         try:
             sticker_id = random.choice(STICKERS["lose"])
             await context.bot.send_sticker(chat_id=chat_id, sticker=sticker_id)
-        except:
+        except Exception:
             pass
-        
+
         return
-    
+
     # تنفيذ الحركة
     try:
         row, col = map(int, query.data.split(","))
     except ValueError:
         return
-    
+
     if not game.make_move(row, col):
-        await query.answer("⚠️ المربع محجوز أو انتهى وقتك!", show_alert=True)
+        try:
+            await query.answer("⚠️ المربع محجوز أو انتهى وقتك!", show_alert=True)
+        except Exception:
+            pass
         return
-    
+
     symbols = game.get_symbols()
-    
+
     # التحقق من الفائز
     winner = game.check_winner()
     if winner:
         if winner == "X":
             update_stats(user_id, "win")
-            result_msg = f"🎉 {random.choice(MESSAGES['win'])}" 
+            result_msg = f"🎉 {random.choice(MESSAGES['win'])}"
             sticker_type = "win"
         else:
             update_stats(user_id, "loss")
             result_msg = f"😔 {random.choice(MESSAGES['lose'])}"
             sticker_type = "lose"
-        
+
         result_text = (
             f"{result_msg}\n\n"
             f"🏆 الفائز: {symbols[winner]}\n"
             f"{game.get_board_text()}\n\n"
             f"📊 الحركات: {game.move_count}"
         )
-        
+
         keyboard = [[
             InlineKeyboardButton("🔄 لعب مرة أخرى", callback_data="restart"),
             InlineKeyboardButton("📊 إحصائيات", callback_data="show_stats")
         ]]
-        
+
         await query.edit_message_text(
             result_text,
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
-        
+
         # إرسال ستيكر
         try:
             sticker_id = random.choice(STICKERS[sticker_type])
             await context.bot.send_sticker(chat_id=chat_id, sticker=sticker_id)
-        except:
+        except Exception:
             pass
-        
+
         return
-    
+
     # التحقق من التعادل
     if game.is_draw():
         update_stats(user_id, "draw")
@@ -544,31 +578,31 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{game.get_board_text()}\n\n"
             f"📊 الحركات: {game.move_count}"
         )
-        
+
         keyboard = [[
             InlineKeyboardButton("🔄 لعب مرة أخرى", callback_data="restart"),
             InlineKeyboardButton("📊 إحصائيات", callback_data="show_stats")
         ]]
-        
+
         await query.edit_message_text(
             result_text,
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
-        
+
         # إرسال ستيكر
         try:
             sticker_id = random.choice(STICKERS["draw"])
             await context.bot.send_sticker(chat_id=chat_id, sticker=sticker_id)
-        except:
+        except Exception:
             pass
-        
+
         return
-    
+
     # تبديل اللاعب ومتابعة اللعب
     game.switch_player()
     encouragement = random.choice(MESSAGES['move'])
-    
+
     await query.edit_message_text(
         f"🎯 **دور:** {symbols[game.current_player]}\n"
         f"💡 {encouragement}\n"
@@ -590,36 +624,31 @@ def main():
     import os
     # الحصول على التوكن من متغيرات البيئة (وهذا هو الأفضل والأكثر أماناً)
     TOKEN = os.getenv('BOT_TOKEN')
-    
+
     # التحقق من وجود التوكن
     if not TOKEN:
         logger.error("BOT_TOKEN environment variable is not set!")
         # يمكن استبدال هذا التوكن بتوكن الاختبار لو لم يكن متوفراً
         # لكن الأفضل هو ترك الكود يفشل لتجنب نشر التوكن
-        raise ValueError("BOT_TOKEN environment variable is required") 
+        raise ValueError("BOT_TOKEN environment variable is required")
 
     app = ApplicationBuilder().token(TOKEN).build()
-    
+
     # إضافة المعالجات
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
     app.add_error_handler(error_handler)
-    
+
     logger.info("✅ Bot is running with new features!")
     print("✅ Bot is running!")
     print("🎨 Themes: 6 available")
     print("⏱️ Timed mode: Enabled")
     print("📊 Stats & History: Enabled")
     print("🎵 Stickers: Enabled")
-    
-    # 💥 التعديل الحاسم هنا!
-    # نشغل سيرفر Flask في خيط منفصل أولاً لضمان بقاء Replit نشطاً
-    keep_alive() 
-    
-    # ثم نشغل البوت الأساسي باستخدام run_polling()، والذي يحافظ على عمل البوت
-    # طالما أن Flask KeepAlive يمنع Replit من الدخول في وضع السكون.
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
-    
+
+    # Run the bot using polling
+    app.run_polling()
+
 # ----------------------------------------------------------------------
 
 if __name__ == "__main__":
